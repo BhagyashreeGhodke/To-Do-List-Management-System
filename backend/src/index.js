@@ -3,10 +3,12 @@ import connectDB from "./db/index.db.js";
 import { app } from "./app.js"
 
 dotenv.config({
-    path:'../.env'
+   
 });
 
 const port = process.env.PORT || 3000
+
+console.log("port: ", port);
 
 connectDB()
 .then( () => {
