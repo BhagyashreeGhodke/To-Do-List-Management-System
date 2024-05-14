@@ -80,6 +80,7 @@ export const deleteTodoItem = async (req, res) => {
 
 // Upload todo items from a CSV file
 export const uploadTodoItemsFromCSV = (req, res) => {
+  // console.log("file: ", req.file);
   if (!req.file) {
     return res.status(400).json({ message: 'No CSV file uploaded' });
   }
@@ -88,45 +89,64 @@ export const uploadTodoItemsFromCSV = (req, res) => {
   
   fs.createReadStream(req.file.path)
     .pipe(csvParser())
-    .on('data', (row) => {
-      todoItems.push(row);
-    })
-    .on('end', async () => {
+    .on('data', async (row) => {
       try {
-        await Todo.insertMany(todoItems);
-        res.json({ message: 'Todo items uploaded successfully' });
+        const todoItem = new Todo(row);
+        await todoItem.save();
+        todoItems.push(todoItem);
       } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Error saving todo item from CSV:', error);
       }
+    })
+    .on('end', () => {
+      res.json({ message: 'Todo items uploaded successfully' });
+    })
+    .on('error', (error) => {
+      console.error('Error parsing CSV:', error);
+      res.status(500).json({ message: 'Error parsing CSV', error: error.message });
     });
 };
 
-// Download the todo list in CSV format
 export const downloadTodoListCSV = async (req, res) => {
   try {
     const todoItems = await Todo.find();
-    console.log("csv todoItems: ", todoItems);
-    const csvData = [];
+    if (!todoItems || todoItems.length === 0) {
+      return res.status(404).json({ message: 'No todo items found' });
+    }
+
+    const filePath = "../backend/src/downloadCSVFile/todoList.csv"
+    const writer = csvWriter();
+    writer.pipe(fs.createWriteStream(filePath));
+
+    writer.write({ id: 'ID', description: 'Description', status: 'Status' });
+
     todoItems.forEach(item => {
-      csvData.push({
-        id: item._id,
-        description: item.description,
-        status: item.status
-      });
+      writer.write({ id: item._id.toString(), description: item.description, status: item.status });
     });
 
-    const writer = csvWriter();
-    writer.pipe(fs.createWriteStream('todoList.csv'));
-    csvData.forEach(item => {
-      writer.write(item);
-    });
     writer.end();
 
-    res.download('todoList.csv');
+    res.download(filePath, 'todoList.csv', (err) => {
+      if (err) {
+        console.error('Error downloading CSV file:', err);
+        return res.status(500).json({ message: 'Error downloading CSV file' });
+      } else {
+        console.log('CSV file downloaded successfully');
+        fs.unlink(filePath, (err) => {
+          if (err) {
+            console.error('Error deleting CSV file:', err);
+          } else {
+            console.log('CSV file deleted successfully');
+          }
+        });
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error downloading todo list:', error);
+    res.status(500).json({ message: 'Error downloading todo list', error: error.message });
   }
 };
+
 
 // Filter todo items based on status
 export const filterTodoItemsByStatus = async (req, res) => {
