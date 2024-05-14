@@ -8,7 +8,7 @@ dotenv.config({
 
 const port = process.env.PORT || 3000
 
-console.log("port: ", port);
+// console.log("port: ", port);
 
 connectDB()
 .then( () => {

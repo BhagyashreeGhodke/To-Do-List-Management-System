@@ -1,9 +1,15 @@
 import { Todo } from '../models/todoItem.model.js';
 import fs from 'fs';
 import csvParser from 'csv-parser';
-import csvWriter from 'csv-write-stream';
+import csvWriter from 'csv-writer';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Get all todo items
+
 export const getAllTodoItems = async (req, res) => {
   try {
     const todoItems = await Todo.find();
@@ -80,26 +86,35 @@ export const deleteTodoItem = async (req, res) => {
 
 // Upload todo items from a CSV file
 export const uploadTodoItemsFromCSV = (req, res) => {
-  // console.log("file: ", req.file);
+  console.log(`*******************************\n
+  file path: `, req.file.path);
   if (!req.file) {
     return res.status(400).json({ message: 'No CSV file uploaded' });
   }
 
   const todoItems = [];
-  
+
   fs.createReadStream(req.file.path)
     .pipe(csvParser())
     .on('data', async (row) => {
       try {
+        // Assuming Todo model constructor expects an object containing todo item properties
         const todoItem = new Todo(row);
         await todoItem.save();
         todoItems.push(todoItem);
       } catch (error) {
         console.error('Error saving todo item from CSV:', error);
+        return res.status(500).json({ message: 'Error saving todo item from CSV', error: error.message });
       }
     })
     .on('end', () => {
-      res.json({ message: 'Todo items uploaded successfully' });
+      // Delete the uploaded CSV file after processing
+      fs.unlink(req.file.path, (err) => {
+        if (err) {
+          console.error('Error deleting CSV file:', err);
+        }
+      });
+      res.json({ message: 'Todo items uploaded successfully', todoItems });
     })
     .on('error', (error) => {
       console.error('Error parsing CSV:', error);
@@ -114,25 +129,32 @@ export const downloadTodoListCSV = async (req, res) => {
       return res.status(404).json({ message: 'No todo items found' });
     }
 
-    const filePath = "../backend/src/downloadCSVFile/todoList.csv"
-    const writer = csvWriter();
-    writer.pipe(fs.createWriteStream(filePath));
+    const filePath = new URL('../downloads/todoList.csv', import.meta.url);
+    const filePathString = fileURLToPath(filePath); // Convert URL to file path
 
-    writer.write({ id: 'ID', description: 'Description', status: 'Status' });
-
-    todoItems.forEach(item => {
-      writer.write({ id: item._id.toString(), description: item.description, status: item.status });
+    const writer = csvWriter.createObjectCsvWriter({
+      path: filePathString,
+      header: [
+        { id: 'id', title: 'ID' },
+        { id: 'description', title: 'Description' },
+        { id: 'status', title: 'Status' }
+      ]
     });
 
-    writer.end();
+    await writer.writeRecords(todoItems.map(item => ({
+      id: item._id.toString(),
+      description: item.description,
+      status: item.status
+    })));
 
-    res.download(filePath, 'todoList.csv', (err) => {
+    res.setHeader('Content-Disposition', 'attachment; filename="todoList.csv"');
+    res.download(filePathString, 'todoList.csv', (err) => { // Use file path string
       if (err) {
         console.error('Error downloading CSV file:', err);
         return res.status(500).json({ message: 'Error downloading CSV file' });
       } else {
         console.log('CSV file downloaded successfully');
-        fs.unlink(filePath, (err) => {
+        fs.unlink(filePathString, (err) => {
           if (err) {
             console.error('Error deleting CSV file:', err);
           } else {
@@ -146,8 +168,6 @@ export const downloadTodoListCSV = async (req, res) => {
     res.status(500).json({ message: 'Error downloading todo list', error: error.message });
   }
 };
-
-
 // Filter todo items based on status
 export const filterTodoItemsByStatus = async (req, res) => {
   const { status } = req.query;
